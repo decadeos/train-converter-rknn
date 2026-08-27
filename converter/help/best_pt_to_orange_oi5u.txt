@@ -1,0 +1,188 @@
+Инструкция: как из best.pt получить best.onnx и best.rknn для Orange Pi 5 Ultra
+
+Текущий рабочий сценарий:
+- все операции подготовки модели выполняются на одной Linux-машине Vootau;
+- рабочий каталог: /home/okhrimenkodi/projects/ml-server;
+- используется одно виртуальное окружение: venv;
+- Windows, WSL и отдельная папка ForOrange больше не нужны для конвертации;
+- на Orange Pi 5 Ultra нужен только готовый файл model/target/best.rknn для запуска через RKNN Lite.
+
+Итоговая цепочка:
+1. Положить свежий best.pt в model/target/best.pt.
+2. Подготовить Linux-окружение venv через init/pip.sh.
+3. Запустить convert/convert.py.
+4. Получить model/target/best.onnx и model/target/best.rknn.
+5. Передать best.rknn на Orange Pi 5 Ultra, если запуск выполняется на плате.
+
+1. Перейти в проект на Linux
+
+  ssh okhrimenkodi@10.0.20.186
+  cd ~/projects/ml-server
+
+2. Положить свежий best.pt
+
+Целевой путь в текущем проекте:
+
+  ~/projects/ml-server/model/target/best.pt
+
+Проверка:
+
+  ls -lh model/target/best.pt
+
+3. Подготовить окружение
+
+Если окружение нужно пересоздать с нуля:
+
+  cd ~/projects/ml-server
+  rm -rf venv
+  bash init/pip.sh
+
+Если окружение уже создано:
+
+  cd ~/projects/ml-server
+  source venv/bin/activate
+  python -m pip check
+
+Ожидаемый результат проверки:
+
+  No broken requirements found.
+
+Важно:
+- рабочее окружение называется именно venv, не .venv;
+- скрипт init/pip.sh создает и наполняет venv;
+- не ставить PyTorch nightly;
+- не ставить rknn-toolkit-lite2 на этой машине;
+- rknn-toolkit2 2.3.2 требует совместимые версии numpy, onnx, protobuf и torch.
+
+Текущие ключевые версии:
+- Python 3.12
+- ultralytics 8.4.41
+- rknn-toolkit2 2.3.2
+- numpy 1.26.4
+- onnx 1.16.1
+- protobuf 4.25.4
+- torch 2.4.0
+- torchvision 0.19.0
+- setuptools 80.9.0
+
+4. Запустить конвертацию best.pt -> best.onnx -> best.rknn
+
+Основная команда:
+
+  cd ~/projects/ml-server
+  source venv/bin/activate
+  python convert/convert.py
+
+Что делает convert/convert.py:
+- печатает Python, который будет использоваться;
+- экспортирует model/target/best.pt в model/target/best.onnx;
+- проверяет ONNX через onnx.checker;
+- если есть sample image, запускает ONNXRuntime smoke test;
+- собирает model/target/best.rknn через rknn-toolkit2 под target rk3588.
+
+Ожидаемая строка Python:
+
+  [ForOrange] Python: /home/okhrimenkodi/projects/ml-server/venv/bin/python
+
+Если вместо этого видишь системный python3 или путь к другому окружению, значит активировано не то окружение.
+
+5. Проверить результат
+
+После успешного запуска должны существовать файлы:
+
+  model/target/best.onnx
+  model/target/best.rknn
+
+Проверка:
+
+  ls -lh model/target/best.pt model/target/best.onnx model/target/best.rknn
+
+Пример ожидаемого результата:
+
+  model/target/best.pt
+  model/target/best.onnx
+  model/target/best.rknn
+
+Также в логе должны быть строки вида:
+
+  ONNX: export success
+  ONNX_OK ['images']
+  Building RKNN model...
+  Exporting RKNN to /home/okhrimenkodi/projects/ml-server/model/target/best.rknn
+
+Предупреждения RKNN вида:
+
+  Warning: Tensor ... qtype ... set to float16 by default
+  E RKNN: Unkown op target: 0
+
+сейчас встречаются в логе, но если команда завершается с кодом 0 и best.rknn создан, сборка считается успешной.
+
+6. Если снова ошибка No module named ultralytics
+
+Проверить, какой Python активен:
+
+  cd ~/projects/ml-server
+  source venv/bin/activate
+  which python
+  python -c "import sys, ultralytics; print(sys.executable); print(ultralytics.__version__)"
+
+Должно быть:
+
+  /home/okhrimenkodi/projects/ml-server/venv/bin/python
+  8.4.41
+
+Если путь другой, выйти из текущего окружения и активировать правильное:
+
+  deactivate 2>/dev/null || true
+  cd ~/projects/ml-server
+  source venv/bin/activate
+
+7. Если окружение сломалось
+
+Самый простой способ восстановить:
+
+  cd ~/projects/ml-server
+  rm -rf venv
+  bash init/pip.sh
+  source venv/bin/activate
+  python -m pip check
+  python convert/convert.py
+
+8. Что НЕ делать
+
+Больше не использовать старую цепочку:
+- Windows export через convert_on_windows.ps1;
+- WSL .venv-linux;
+- папку ForOrange как отдельное место сборки;
+- ручную установку torch nightly CUDA 13.2;
+- ручную установку onnx==1.16.0;
+- pip install pip3;
+- rknn-toolkit-lite2 на Linux-машине сборки.
+
+9. Передача на Orange Pi 5 Ultra
+
+Если запуск детектора выполняется на Orange Pi 5 Ultra, на плату нужно передать готовый файл:
+
+  ~/projects/ml-server/model/target/best.rknn
+
+Дальнейший запуск на Orange зависит от текущей структуры проекта на плате. Главное: использовать именно best.rknn, собранный под target rk3588.
+
+10. Краткая шпаргалка
+
+Полный цикл на Linux Vootau:
+
+  ssh okhrimenkodi@10.0.20.186
+  cd ~/projects/ml-server
+  cp /path/to/new/best.pt model/target/best.pt
+  rm -rf venv
+  bash init/pip.sh
+  source venv/bin/activate
+  python convert/convert.py
+  ls -lh model/target/best.onnx model/target/best.rknn
+
+Повторная конвертация, если venv уже готов:
+
+  ssh okhrimenkodi@10.0.20.186
+  cd ~/projects/ml-server
+  source venv/bin/activate
+  python convert/convert.py
